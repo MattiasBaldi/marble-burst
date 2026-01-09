@@ -3,8 +3,11 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshSurfaceSampler } from "three/addons/math/MeshSurfaceSampler.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import * as THREE from "three/webgpu";
-import { attribute, float, Fn, instancedArray, instanceIndex, attributeArray, time, oscSine, mul, sin, vec3, vec4, uniform, hash, texture } from "three/tsl";
+import { attribute, float, Fn, instancedArray, instanceIndex, deltaTime, attributeArray, time, oscSine, mul, sin, vec3, vec4, uniform, hash, texture } from "three/tsl";
 import {GUI} from 'lil-gui'
+import {simplexNoise} from 'tsl-textures'
+
+console.log(THREE)
 
 const gui = new GUI()
 const loader = new GLTFLoader();
@@ -16,7 +19,8 @@ const particlesFolder = gui.addFolder("Particles")
 
 let scene, model;
 const settings = {
-  count: 50000,
+  modelScale: 4, 
+  count: 400000,
   scale: 0.01,
   posX: 0,
   posY: 0,
@@ -28,18 +32,22 @@ const settings = {
 const scaleUniform = uniform(0.01);
 const colorUniform = uniform(new THREE.Color(1.0, 0.0, 0.0));
 
-// Oscillation uniforms
-const oscAmplitude = uniform(0.0005);
-const oscSpeed = uniform(1.0);
-const oscFrequency = uniform(6.28);
+// Noise/Oscillation uniforms (used in compute shader)
+const noiseAmplitude = uniform(0.1);
+const noiseSpeed = uniform(1.0);
+const noiseScale = uniform(1.0);
+const noiseEnabled = uniform(1.0); // 1 = on, 0 = off
 
 loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
   scene = gltf.scene;
   model = scene.children[0];
 
-  const nor = texLoader.load("./marble_bust_01_1k.gltf/textures/nor.jpg");
-  const diff = texLoader.load("./marble_bust_01_1k.gltf/textures/diff.jpg");
-  const rough = texLoader.load("./marble_bust_01_1k.gltf/textures/rough.jpg");
+  // Initial scale
+  model.scale.setScalar(settings.modelScale)
+
+  const nor = texLoader.load("./marble_bust_01_1k.gltf/textures/marble_bust_01_nor_gl_1k.jpg");
+  const diff = texLoader.load("./marble_bust_01_1k.gltf/textures/marble_bust_01_diff_1k.jpg");
+  const rough = texLoader.load("./marble_bust_01_1k.gltf/textures/marble_bust_01_rough_1k.jpg");
 
   nor.flipY = false;
   diff.flipY = false;
@@ -64,37 +72,63 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
 
   //create attributes
   const position = instancedArray(sampled.positions, 'vec3')
+  const originalPosition = instancedArray(sampled.positions, 'vec3') // store original for oscillation
   const particleUVs = instancedArray(sampled.uvs, 'vec2')
   const velocities = instancedArray(settings.count, 'vec3')
   const colors = instancedArray(settings.count, 'vec3')
 
-  // Sample the diffuse texture at each particle's UV
-  const diffuseTexture = texture(diff)
+  // Sample textures at each particle's UV
   const particleUV = particleUVs.element(instanceIndex)
+
+  const diffuseTexture = texture(diff)
+  const normalTexture = texture(nor)
+  const roughTexture = texture(rough)
+
   const sampledColor = diffuseTexture.sample(particleUV)
+  const sampledNormal = normalTexture.sample(particleUV)
+  const sampledRough = roughTexture.sample(particleUV)
 
   const material = new THREE.SpriteNodeMaterial();
-  material.colorNode = sampledColor; // use sampled texture color
+  material.colorNode = sampledColor;
   material.positionNode = position.toAttribute()
-  material.scaleNode = scaleUniform; 
+  material.roughnessNode = sampledRough
+  material.normalNode = sampledNormal
+  material.scaleNode = scaleUniform;
+  // Optional: use roughness to modulate opacity (smoother = more transparent)
+  // material.opacityNode = sampledRough.r;
+  // Optional: use normal map to slightly offset sprite position for depth effect
+  // material.positionNode = position.toAttribute().add(sampledNormal.sub(0.5).mul(0.01)); 
 
   const particles = new THREE.Sprite(material)
   particles.count = settings.count;
   particles.frustumCulled = false;
+
+
+  console.log(material)
   boiler.scene.add(particles)
 
-  // Particle Count
-  particlesFolder.add(settings, 'count').min(1000).max(100000).step(1000).onChange((v: number) => {
-    const newSampled = sample(model as THREE.Mesh, v)
+  // Helper to resample particles (used by count and modelScale changes)
+  const resampleParticles = () => {
+    const newSampled = sample(model as THREE.Mesh, settings.count)
     const newPosition = instancedArray(newSampled.positions, 'vec3')
     const newUVs = instancedArray(newSampled.uvs, 'vec2')
 
     material.positionNode = newPosition.toAttribute()
-    // Note: updating colorNode with new UVs requires rebuilding the texture sample
     const newSampledColor = diffuseTexture.sample(newUVs.element(instanceIndex))
     material.colorNode = newSampledColor
     material.needsUpdate = true
-    particles.count = v
+    particles.count = settings.count
+  }
+
+  // Model Scale (resamples particles to match new scale)
+  modelFolder.add(settings, 'modelScale').min(0.1).max(10).step(0.1).onChange((v: number) => {
+    model.scale.setScalar(v)
+    resampleParticles()
+  });
+
+  // Particle Count
+  particlesFolder.add(settings, 'count').min(1000).max(500000).step(1000).onChange(() => {
+    resampleParticles()
   });
 
   // Scale
@@ -103,41 +137,48 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
   });
 
   // Position
-  particles.position.x += .5
+  particles.position.x += 1.5
   const posFolder = particlesFolder.addFolder('Position');
   posFolder.add(particles.position, 'x').min(-10).max(10).step(0.1);
   posFolder.add(particles.position, 'y').min(-10).max(10).step(0.1);
   posFolder.add(particles.position, 'z').min(-10).max(10).step(0.1);
 
+
   // Visibility
   particlesFolder.add(particles, 'visible');
 
-  // Oscillation GUI
-  const oscFolder = particlesFolder.addFolder('Oscillation');
-  oscFolder.add(oscAmplitude, 'value').min(0).max(0.01).step(0.0001).name('Amplitude');
-  oscFolder.add(oscSpeed, 'value').min(0).max(5).step(0.1).name('Speed');
-  oscFolder.add(oscFrequency, 'value').min(1).max(20).step(0.1).name('Frequency');
+  // Noise/Oscillation GUI - these update uniforms used in compute shader
+  const noiseFolder = particlesFolder.addFolder('Oscillation');
+  noiseFolder.add(noiseAmplitude, 'value').min(0).max(1).step(0.01).name('Amplitude');
+  noiseFolder.add(noiseSpeed, 'value').min(0).max(10).step(0.1).name('Speed');
+  noiseFolder.add(noiseEnabled, 'value').min(0).max(1).step(1).name('Enabled (0/1)');
 
-  // Compute - in/out oscillation
+  // Compute - in/out oscillation with GUI-controlled uniforms
   const computeUpdate = Fn(() => {
+    const origPos = originalPosition.element(instanceIndex)
     const pos = position.element(instanceIndex)
 
-    // Per-particle random phase offset (0-1)
+    // Per-particle phase using hash of index
     const phase = hash(instanceIndex)
 
-    // Oscillation: sin(time*speed + phase * frequency) * amplitude
-    const oscil = sin(time.mul(oscSpeed).add(phase.mul(oscFrequency))).mul(oscAmplitude)
+    // Animated noise input: use time * speed + per-particle phase
+    const animatedTime = time.mul(noiseSpeed).add(phase.mul(6.28))
 
-    // Direction from center (normalized position = outward direction)
-    const dir = pos.normalize()
 
-    // Push in/out along the direction
-    pos.addAssign(dir.mul(oscil))
+    // 
+    const amp = noiseAmplitude.mul(sin(time))
+    const oscillation = sin(animatedTime).mul(amp)
+
+    const direction = position.normalize();
+
+    // Calculate new position: original + (direction * oscillation * enabled)
+    // Using assign to completely overwrite (no accumulation)
+    pos.assign(origPos).mul(direction)
+    pos.addAssign((oscillation))
   })
 
   // reference the compute particles
 	const computeParticles = computeUpdate().compute(settings.count).setName('Update Particles');
-
   // const computeHit = Fn(() => {})().compute(count).setName("Hit")
 
   // animation - temporarily disabled to debug
@@ -159,8 +200,16 @@ const sample = (model: THREE.Mesh, count: number) => {
   const _normal = new THREE.Vector3();
   const _uv = new THREE.Vector2();
 
+  // Get the model's world matrix to transform local -> world space
+  model.updateMatrixWorld();
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(model.matrixWorld);
+
   for (let i = 0; i < count; i++) {
     sampler.sample(_position, _normal, undefined, _uv);
+
+    // Apply world transform (includes scale, rotation, position)
+    _position.applyMatrix4(model.matrixWorld);
+    _normal.applyMatrix3(normalMatrix).normalize();
 
     positions[i * 3] = _position.x;
     positions[i * 3 + 1] = _position.y;
