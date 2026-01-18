@@ -1,6 +1,11 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+// Remove default margins/padding from body
+document.body.style.margin = "0";
+document.body.style.padding = "0";
+document.body.style.overflow = "hidden";
+
 const canvas = document.createElement("canvas");
 canvas.style.cssText =
   "display: block; position: fixed; width: 100vw; height: 100vh; z-index: 10";
@@ -8,6 +13,7 @@ document.body.appendChild(canvas);
 
 const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
 
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -16,6 +22,18 @@ const camera = new THREE.PerspectiveCamera(
   1000
 );
 camera.position.z = 4;
+
+// Handle window resize
+function onWindowResize() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  renderer.setSize(width, height);
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+}
+
+window.addEventListener("resize", onWindowResize);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
