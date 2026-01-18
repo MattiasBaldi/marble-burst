@@ -13,7 +13,7 @@ document.body.appendChild(canvas);
 
 const renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.max(window.devicePixelRatio, 1.5));
 
 const camera = new THREE.PerspectiveCamera(
   75,
