@@ -5,13 +5,19 @@ import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import * as THREE from "three/webgpu";
 import { Fn, instancedArray, instanceIndex, time, sin, uniform, hash, texture } from "three/tsl";
 import {GUI} from 'lil-gui'
-import {DefaultLoadingManager} from 'three'
 
 const blocker = document.createElement("div")
 blocker.style.cssText = "position: fixed; background: white; width: 100vw; height: 100vh; top: 0; left: 0; z-index: 1000; display: flex; justify-content: center; align-items: center;"
 document.body.appendChild(blocker)
-
-DefaultLoadingManager.onLoad = () => blocker.style.display = 'none'
+const loadFn = setInterval( () => {
+  if (blocker.textContent !== "...")
+  {
+    blocker.textContent = blocker.textContent + "."
+  }
+  else {
+    blocker.textContent = ""
+  }
+}, 100)
 
 const gui = new GUI()
 const loader = new GLTFLoader();
@@ -181,6 +187,10 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf: GLTF
   boiler.addAnimation(() => {
      boiler.renderer.compute(computeParticles)
   })
+
+  // Scene is fully loaded and ready, hide the loading blocker
+  clearInterval(loadFn)
+  blocker.style.display = 'none'
 });
 
 
