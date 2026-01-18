@@ -9,7 +9,6 @@ import {DefaultLoadingManager} from 'three'
 
 const blocker = document.createElement("div")
 blocker.style.cssText = "position: fixed; background: white; width: 100vw; height: 100vh; top: 0; left: 0; z-index: 1000; display: flex; justify-content: center; align-items: center;"
-blocker.textContent = "loading..."
 document.body.appendChild(blocker)
 
 DefaultLoadingManager.onLoad = () => blocker.style.display = 'none'
@@ -171,7 +170,7 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf: GLTF
     // Calculate new position: original + (direction * oscillation * enabled)
     // Using assign to completely overwrite (no accumulation)
     pos.assign(origPos).mul(oscillation.mul(phase))
-    //pos.mulAssign((oscillation))
+    pos.addAssign((oscillation))
   })
 
   // reference the compute particles
