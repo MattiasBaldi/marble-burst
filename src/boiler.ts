@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const canvas = document.createElement("canvas");
 canvas.style.cssText =
