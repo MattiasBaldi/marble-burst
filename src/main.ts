@@ -1,13 +1,18 @@
 import * as boiler from "./boiler.ts";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { MeshSurfaceSampler } from "three/addons/math/MeshSurfaceSampler.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import * as THREE from "three/webgpu";
-import { attribute, float, Fn, instancedArray, instanceIndex, deltaTime, attributeArray, time, oscSine, mul, sin, vec3, vec4, uniform, hash, texture } from "three/tsl";
+import { Fn, instancedArray, instanceIndex, time, sin, uniform, hash, texture } from "three/tsl";
 import {GUI} from 'lil-gui'
-import {simplexNoise} from 'tsl-textures'
+import {DefaultLoadingManager} from 'three'
 
-console.log(THREE)
+const blocker = document.createElement("div")
+blocker.style.cssText = "position: fixed; background: white; width: 100vw; height: 100vh; top: 0; left: 0; z-index: 1000; display: flex; justify-content: center; align-items: center;"
+blocker.textContent = "loading..."
+document.body.appendChild(blocker)
+
+DefaultLoadingManager.onLoad = () => blocker.style.display = 'none'
 
 const gui = new GUI()
 const loader = new GLTFLoader();
@@ -17,7 +22,8 @@ const hdrLoader = new HDRLoader();
 const modelFolder = gui.addFolder("Model")
 const particlesFolder = gui.addFolder("Particles")
 
-let scene, model;
+let scene: THREE.Group;
+let model: THREE.Object3D | null = null;
 const settings = {
   modelScale: 4, 
   count: 400000,
@@ -30,15 +36,13 @@ const settings = {
 
 // Create uniforms for dynamic values
 const scaleUniform = uniform(0.01);
-const colorUniform = uniform(new THREE.Color(1.0, 0.0, 0.0));
 
 // Noise/Oscillation uniforms (used in compute shader)
 const noiseAmplitude = uniform(0.1);
 const noiseSpeed = uniform(1.0);
-const noiseScale = uniform(1.0);
 const noiseEnabled = uniform(1.0); // 1 = on, 0 = off
 
-loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
+loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf: GLTF) => {
   scene = gltf.scene;
   model = scene.children[0];
 
@@ -54,10 +58,11 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
   rough.flipY = false;
 
   // Model
-  model.material.map = diff;
-  model.material.roughnessMap = rough;
-  model.material.needsUpdate = true;
-  model.material.normalMap = nor;
+  const meshMaterial = (model as THREE.Mesh).material as THREE.MeshStandardMaterial;
+  meshMaterial.map = diff;
+  meshMaterial.roughnessMap = rough;
+  meshMaterial.needsUpdate = true;
+  meshMaterial.normalMap = nor;
   model.visible = true; 
   modelFolder.add(model, 'visible')
   boiler.scene.add(model)
@@ -74,24 +79,19 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
   const position = instancedArray(sampled.positions, 'vec3')
   const originalPosition = instancedArray(sampled.positions, 'vec3') // store original for oscillation
   const particleUVs = instancedArray(sampled.uvs, 'vec2')
-  const velocities = instancedArray(settings.count, 'vec3')
-  const colors = instancedArray(settings.count, 'vec3')
 
   // Sample textures at each particle's UV
   const particleUV = particleUVs.element(instanceIndex)
 
   const diffuseTexture = texture(diff)
   const normalTexture = texture(nor)
-  const roughTexture = texture(rough)
 
   const sampledColor = diffuseTexture.sample(particleUV)
   const sampledNormal = normalTexture.sample(particleUV)
-  const sampledRough = roughTexture.sample(particleUV)
 
   const material = new THREE.SpriteNodeMaterial();
   material.colorNode = sampledColor;
   material.positionNode = position.toAttribute()
-  material.roughnessNode = sampledRough
   material.normalNode = sampledNormal
   material.scaleNode = scaleUniform;
   // Optional: use roughness to modulate opacity (smoother = more transparent)
@@ -122,7 +122,7 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
 
   // Model Scale (resamples particles to match new scale)
   modelFolder.add(settings, 'modelScale').min(0.1).max(10).step(0.1).onChange((v: number) => {
-    model.scale.setScalar(v)
+    model!.scale.setScalar(v)
     resampleParticles()
   });
 
@@ -143,7 +143,6 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
   posFolder.add(particles.position, 'y').min(-10).max(10).step(0.1);
   posFolder.add(particles.position, 'z').min(-10).max(10).step(0.1);
 
-
   // Visibility
   particlesFolder.add(particles, 'visible');
 
@@ -162,19 +161,17 @@ loader.load("./marble_bust_01_1k.gltf/marble_bust_01_1k.gltf", async (gltf) => {
     const phase = hash(instanceIndex)
 
     // Animated noise input: use time * speed + per-particle phase
-    const animatedTime = time.mul(noiseSpeed).add(phase.mul(6.28))
+    const animatedTime = time.mul(noiseSpeed).add(phase.mul(10.28))
 
-
-    // 
+    //
     const amp = noiseAmplitude.mul(sin(time))
+    console.log(amp)
     const oscillation = sin(animatedTime).mul(amp)
-
-    const direction = position.normalize();
 
     // Calculate new position: original + (direction * oscillation * enabled)
     // Using assign to completely overwrite (no accumulation)
-    pos.assign(origPos).mul(direction)
-    pos.addAssign((oscillation))
+    pos.assign(origPos).mul(oscillation.mul(phase))
+    //pos.mulAssign((oscillation))
   })
 
   // reference the compute particles
