@@ -10,7 +10,6 @@ import {DefaultLoadingManager} from 'three'
 const blocker = document.createElement("div")
 blocker.style.cssText = "position: fixed; background: white; width: 100vw; height: 100vh; top: 0; left: 0; z-index: 1000; display: flex; justify-content: center; align-items: center;"
 document.body.appendChild(blocker)
-blocker.textContent = "loading"
 
 const loadFn = setInterval( () => {
   if (blocker.textContent !== "...")

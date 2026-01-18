@@ -13,3 +13,6 @@ Work in progress.
 - Three.js (WebGPU renderer)
 - TSL for compute shaders
 - Vite + TypeScript
+
+![Demo](./demo.gif)
+[Demo](https://marble-burst.pages.dev/)
